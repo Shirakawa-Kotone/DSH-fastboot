@@ -1,0 +1,25 @@
+{
+  "name": "@local/dsh-mcp-fastboot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Skips the MCP 2026-07-28 probe and npm launch overhead so Host startup no longer waits on stdio MCP servers.",
+  "exports": {
+    ".": "./lib/index.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/patch.js",
+    "scripts/link-sdk.mjs",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

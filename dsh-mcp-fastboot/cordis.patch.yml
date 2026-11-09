@@ -1,0 +1,7 @@
+# mcp-fastboot has no config. It must be mounted before the MCP client rows so
+# its module-level SDK patch is in place before those entries start connecting.
+# Bundle layers apply before the profile's own cordis.patch.yml, which is where
+# the mcp-* rows live.
+- insert:
+    - id: mcp-fastboot
+      name: '@local/dsh-mcp-fastboot'

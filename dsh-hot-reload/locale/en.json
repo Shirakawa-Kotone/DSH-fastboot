@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Hot Reload",
+    "description": "Reload changed services in place instead of restarting the whole DSH Host."
+  }
+}

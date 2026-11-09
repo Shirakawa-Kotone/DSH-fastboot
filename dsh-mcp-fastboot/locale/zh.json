@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "MCP 快速启动",
+    "description": "跳过 stdio MCP 服务器的协议探测与 npm 启动开销，让 Host 启动不再被 mcp-remote 拖慢。"
+  }
+}
