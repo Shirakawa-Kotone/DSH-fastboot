@@ -40,5 +40,14 @@
     "engines": {
       "dsh": ">=0.2.1-rc.5"
     }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Shirakawa-Kotone/DSH-fastboot.git",
+    "directory": "npm-publish/dsh-hot-reload"
+  },
+  "homepage": "https://github.com/Shirakawa-Kotone/DSH-fastboot#readme",
+  "bugs": {
+    "url": "https://github.com/Shirakawa-Kotone/DSH-fastboot/issues"
   }
 }

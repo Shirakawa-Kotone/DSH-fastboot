@@ -1,0 +1,50 @@
+name: publish
+
+# Publishes the npm-publish/ packages with npm Trusted Publishing (OIDC).
+# No npm token or 2FA is involved: the registry trusts this exact workflow.
+# Configure the trusted publisher once per package on npmjs.com:
+#   Provider: GitHub Actions
+#   Organization: Shirakawa-Kotone
+#   Repository: DSH-fastboot
+#   Workflow filename: publish.yml
+#   Environment: (empty)
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      # Trusted publishing needs a recent npm CLI (OIDC is built in).
+      - name: Use the latest npm
+        run: npm install --global npm@latest
+
+      # Dependency order: libraries first, the meta bundle last.
+      - name: Publish versions that are not on the registry yet
+        shell: bash
+        run: |
+          set -euo pipefail
+          for dir in dsh-hot-reload dsh-mcp-fastboot dsh-mcp-background dsh-fastboot; do
+            name=$(node -p "require('./npm-publish/${dir}/package.json').name")
+            version=$(node -p "require('./npm-publish/${dir}/package.json').version")
+            if npm view "${name}@${version}" version >/dev/null 2>&1; then
+              echo "skip ${name}@${version} (already on the registry)"
+              continue
+            fi
+            echo "publishing ${name}@${version}"
+            ( cd "npm-publish/${dir}" && npm publish --provenance --access public )
+          done
