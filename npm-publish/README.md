@@ -33,6 +33,28 @@ Then restart DSH. No config is needed.
 - The three individual packages remain available for users who want one
   capability only.
 
+## Releasing (trusted publishing)
+
+Publishing runs from GitHub Actions with **npm Trusted Publishing (OIDC)** —
+no npm token and no 2FA prompt:
+
+```sh
+# bump the version(s) in npm-publish/*/package.json, then:
+git tag v1.2.1 && git push origin v1.2.1
+```
+
+The `publish` workflow (`.github/workflows/publish.yml`) publishes every
+`npm-publish/*` package whose version is not on the registry yet (libraries
+first, the meta bundle last), with a provenance statement. Each package has a
+trusted publisher configured on npmjs.com:
+
+- Provider: GitHub Actions
+- Repository: `Shirakawa-Kotone/DSH-fastboot`
+- Workflow: `publish.yml`
+
+This replaces token-based publishing, which npm is retiring for direct
+publishes in January 2027.
+
 ## Links
 
 - https://www.npmjs.com/package/@shirakawa-kotone/dsh-fastboot
