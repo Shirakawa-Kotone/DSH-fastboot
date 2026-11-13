@@ -1,5 +1,7 @@
 # DSH Fastboot
 
+[![M8ven Score](https://m8ven.ai/badge/mcp/shirakawa-kotone-dsh-fastboot-191awx?v=173d8b6f996ae9dd6d1c3ecac157da96)](https://m8ven.ai/mcp/shirakawa-kotone-dsh-fastboot-191awx?s=readme)
+
 Small [DeepSeek Harness](https://github.com/deepseek-ai) (DSH) bundles that make
 the Host start faster, reload faster, restart from inside the GUI, and make MCP
 startup stop gating the Web UI.
