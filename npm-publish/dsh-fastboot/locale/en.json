@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "DSH Fast Boot Suite",
+    "description": "MCP background start, no stdio probe/npx overhead, /reload hot reload, /reboot full-Host restart, and the Creation-mode reboot_dsh tool."
+  }
+}

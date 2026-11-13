@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "MCP Background Start",
+    "description": "Connects MCP servers in the background so their startup time no longer delays the Host and Web UI."
+  }
+}

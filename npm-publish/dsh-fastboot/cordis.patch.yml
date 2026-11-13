@@ -1,0 +1,8 @@
+# One bundle, two entries: MCP fast boot (which already includes background
+# start) and the hot-reload tool that carries /reload and /reboot. The underlying
+# packages are npm dependencies of this bundle, so they install together.
+- insert:
+    - id: mcp-fastboot
+      name: '@shirakawa-kotone/dsh-mcp-fastboot'
+    - id: hot-reload
+      name: '@shirakawa-kotone/dsh-hot-reload'

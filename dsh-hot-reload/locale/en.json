@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "Hot Reload",
-    "description": "Reload changed services in place instead of restarting the whole DSH Host."
+    "title": "Hot Reload & Reboot",
+    "description": "Reload changed services in place, restart the whole DSH Host with /reboot, and let Creation-mode sessions restart it with reboot_dsh and continue."
   }
 }

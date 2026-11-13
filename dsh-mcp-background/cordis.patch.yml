@@ -1,0 +1,5 @@
+# Must be mounted before the profile's mcp-* rows: the module-level loader
+# patch has to be in place when those entries call unwrapExports().
+- insert:
+    - id: mcp-background
+      name: '@local/dsh-mcp-background'

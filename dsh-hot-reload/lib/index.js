@@ -1,6 +1,6 @@
 /**
  * dsh-hot-reload — reload changed DSH services in place instead of restarting
- * the whole Host.
+ * the whole Host, and restart the whole Host on request.
  *
  * The HMR service already owns the hard part: `reconcileProfile()` compares
  * every loaded module below the profile and its linked package roots with the
@@ -13,7 +13,15 @@
  * It also offers a lighter "restart these entries" action that disposes and
  * re-creates one or more entries without touching code or config (useful for
  * reconnecting an MCP bridge), and a compact entry listing.
+ *
+ * Since some changes (the CLI version, a profile manifest, an unloadable host
+ * module) cannot be applied in place, it also registers `/reboot`: a full Host
+ * relaunch driven from inside the GUI. See `reboot.js` for the mechanics.
  */
+
+import { quoteCommand, scheduleReboot } from './reboot.js'
+import { createRebootTool, isCreationMode } from './tool.js'
+
 
 const STATE = {
   0: 'pending',
@@ -255,6 +263,22 @@ function createTool(ctx) {
 export const name = 'hot-reload'
 export const inject = ['tools']
 
+const REBOOT_USAGE = 'Usage: /reboot [--dry-run] [--open]'
+
+/**
+ * Describe the relaunch plan for a human: what runs, from where, and where the
+ * new Host's output goes.
+ * @param {{ execPath: string, args: string[], cwd: string, logPath: string, command: string[] }} plan
+ * @returns {string[]} display lines.
+ */
+function describePlan(plan) {
+  return [
+    `command: ${quoteCommand(plan.command)}`,
+    `cwd: ${plan.cwd}`,
+    `log: ${plan.logPath}`
+  ]
+}
+
 /** Register /reload: no argument reloads changed modules; arguments restart entry ids. */
 function registerCommand(inner) {
   inner.commands.register({
@@ -270,11 +294,75 @@ function registerCommand(inner) {
           : await restartEntries(inner, input.split(/\s+/), false)
         const elapsed = Math.round(performance.now() - started)
         const ids = outcome.restarted.join(', ') || 'none'
-        const pending = outcome.pending.length > 0 ? `\nneeds full restart: ${outcome.pending.map((item) => item.url).join(', ')}` : ''
+        const pending = outcome.pending.length > 0
+          ? `\nneeds full restart: ${outcome.pending.map((item) => item.url).join(', ')}\nrun /reboot to restart the whole Host`
+          : ''
         const warning = outcome.warnings.length > 0 ? `\nwarnings: ${outcome.warnings.join('; ')}` : ''
         return { kind: 'success', text: `Reloaded ${outcome.restarted.length} entr${outcome.restarted.length === 1 ? 'y' : 'ies'} in ${elapsed} ms: ${ids}${pending}${warning}` }
       } catch (error) {
         return { kind: 'error', text: `reload failed: ${error instanceof Error ? error.message : String(error)}` }
+      }
+    }
+  })
+}
+
+/**
+ * Register /reboot: restart the whole Host; MCP servers reconnect in the
+ * background. It is offered only where a web surface is mounted, because a
+ * detached relaunch of a terminal/ACP process would be invisible.
+ */
+function registerRebootCommand(inner) {
+  inner.commands.register({
+    definitionId: '@local/dsh-hot-reload',
+    name: 'reboot',
+    description: 'Restart the whole DSH Host; MCP servers reconnect in the background',
+    input: { hint: '--dry-run | --open' },
+    handler: async (invocation) => {
+      const words = invocation.rawInput.trim() === '' ? [] : invocation.rawInput.trim().split(/\s+/)
+      if (words.includes('--help') || words.includes('-h')) return { kind: 'success', text: REBOOT_USAGE }
+      const dryRun = words.includes('--dry-run') || words.includes('-n')
+      const allowOpen = words.includes('--open')
+      const unknown = words.filter((word) => !['--dry-run', '-n', '--open'].includes(word))
+      if (unknown.length > 0) {
+        return { kind: 'error', text: `unknown /reboot argument${unknown.length === 1 ? '' : 's'}: ${unknown.join(' ')}\n${REBOOT_USAGE}` }
+      }
+      try {
+        // A Host started with `--port 0` (or a configured zero port) listens on
+        // an OS-assigned port; pin the relaunch to the bound port so the page
+        // can rejoin the same origin. `webApp` decides whether the web-only
+        // flags (`--port`, `--no-open`) belong on the relaunch.
+        const webServer = inner.get('webServer')
+        if (webServer === undefined) {
+          return { kind: 'error', text: 'reboot is unavailable in this profile (no web server); restart the Host manually instead' }
+        }
+        const actualPort = typeof webServer.port === 'number' ? webServer.port : undefined
+        const outcome = await scheduleReboot({
+          dryRun,
+          allowOpen,
+          actualPort,
+          actualHost: typeof webServer.host === 'string' ? webServer.host : undefined,
+          web: inner.get('webApp') !== undefined
+        })
+        const lines = describePlan(outcome.plan)
+        if (outcome.kind === 'dry-run') {
+          return { kind: 'success', text: [`reboot plan (not executed), pid ${process.pid}:`, ...lines].join('\n') }
+        }
+        if (outcome.kind === 'already-scheduled') {
+          return {
+            kind: 'success',
+            text: `A reboot is already scheduled (helper pid ${String(outcome.workerPid)}); this Host exits in about ${String(outcome.delayMs)} ms.\n${lines[0]}`
+          }
+        }
+        return {
+          kind: 'success',
+          text: [
+            `Restarting DSH (pid ${process.pid}) in ${String(outcome.delayMs)} ms; helper pid ${String(outcome.workerPid)}.`,
+            'The page reconnects on its own (a few seconds); MCP servers restart with the new Host and, with the fastboot bundle, reconnect in the background.',
+            ...lines
+          ].join('\n')
+        }
+      } catch (error) {
+        return { kind: 'error', text: `reboot failed: ${error instanceof Error ? error.message : String(error)}` }
       }
     }
   })
@@ -286,5 +374,27 @@ export function apply(ctx) {
   })
   ctx.inject(['commands', 'hmr', 'loader'], (inner) => {
     registerCommand(inner)
+  })
+  // /reboot needs the command registry and a bound web server: the relaunch is
+  // only meaningful for a browser-facing Host, and the bound port is what the
+  // relaunch must preserve. It works even when HMR is absent.
+  ctx.inject(['commands', 'webServer'], (inner) => {
+    registerRebootCommand(inner)
+  })
+  // `reboot_dsh` is the Creation-mode (cordis preset) counterpart: a session may
+  // restart the Host itself when it is the only one running. The `when`
+  // predicate keeps the tool out of ordinary sessions; the tool rechecks that
+  // and refuses while another session is still running.
+  ctx.inject(['tools', 'agents', 'agentPresets', 'schedule', 'webServer'], (inner) => {
+    const services = {
+      agents: inner.agents,
+      agentPresets: inner.agentPresets,
+      schedule: inner.schedule,
+      webServer: inner.webServer,
+      webApp: inner.get('webApp')
+    }
+    inner.tools.register(createRebootTool(services), {
+      when: (activation) => isCreationMode(services.agentPresets, activation.agent)
+    })
   })
 }

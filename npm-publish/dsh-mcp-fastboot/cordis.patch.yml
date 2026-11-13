@@ -1,0 +1,5 @@
+# Must be mounted before the profile's mcp-* rows. Bundle layers apply before
+# the profile's own patch layer, so this insert lands ahead of them.
+- insert:
+    - id: mcp-fastboot
+      name: '@shirakawa-kotone/dsh-mcp-fastboot'

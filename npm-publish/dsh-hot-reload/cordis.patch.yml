@@ -1,0 +1,3 @@
+- insert:
+    - id: hot-reload
+      name: '@shirakawa-kotone/dsh-hot-reload'

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "MCP Fast Boot",
+    "description": "Skips the MCP protocol probe and npm launch overhead for stdio MCP servers, so Host startup no longer waits on mcp-remote."
+  }
+}

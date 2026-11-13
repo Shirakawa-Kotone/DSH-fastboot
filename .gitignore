@@ -1,6 +1,12 @@
 node_modules/
+# machine-specific linked package target
 links/
 .DS_Store
 *.log
 *.bak
 *.bak-*
+video/out/
+video/public/soundtrack.wav
+
+# local scratch space for e2e runs
+.tmp/

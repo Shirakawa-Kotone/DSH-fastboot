@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "MCP 后台启动",
+    "description": "让 MCP 服务器在后台连接，不再阻塞 Host / Web UI 的启动。"
+  }
+}

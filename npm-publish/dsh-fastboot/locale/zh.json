@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "DSH 快速启动套件",
+    "description": "MCP 后台启动、跳过 stdio 协议探测与 npx 开销、/reload 热重载、/reboot 整机重启，以及创造模式的 reboot_dsh 工具。"
+  }
+}

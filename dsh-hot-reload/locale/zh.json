@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "热重载",
-    "description": "原地重载变更的服务，而不是重启整个 DSH Host。"
+    "title": "热重载与重启",
+    "description": "原地重载变更的服务、用 /reboot 完整重启 DSH Host，并让创造模式会话通过 reboot_dsh 自行重启后继续。"
   }
 }

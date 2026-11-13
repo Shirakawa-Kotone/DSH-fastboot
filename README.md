@@ -1,209 +1,190 @@
 # DSH Fastboot
 
-Two small [DeepSeek Harness](https://github.com/deepseek-ai) (DSH) bundles that
-make the Host start faster and reload faster:
+Small [DeepSeek Harness](https://github.com/deepseek-ai) (DSH) bundles that make
+the Host start faster, reload faster, restart from inside the GUI, and make MCP
+startup stop gating the Web UI.
 
-| Bundle | What it fixes | Effect |
+## Video
+
+A 1:54, 1080P project intro is in [`video/`](video/README.md): it covers
+the problem, the two mechanisms, and the measured result (8.14 s → 4.37 s,
+then 2.22 s with background initialization). The rendered file is
+`video/out/dsh-fastboot.mp4`; the shot list is
+[`video/STORYBOARD.md`](video/STORYBOARD.md).
+
+## Packages
+
+| Package | What it fixes | Effect |
 |---|---|---|
-| [`dsh-mcp-fastboot`](dsh-mcp-fastboot/README.md) | Every stdio MCP server pays a protocol probe on a throwaway sibling process, plus npm's launch overhead. | Host ready in ~5.4 s instead of ~7.6–10.4 s\* |
-| [`dsh-hot-reload`](dsh-hot-reload/README.md) | DSH's file watcher does not watch **linked** plugins, so editing one means a full Host restart. | `reload_dsh` / `/reload` restarts only the affected entries in ~100 ms |
+| **`@shirakawa-kotone/dsh-fastboot`** | Meta bundle: MCP fast boot + hot reload + `/reboot` in one install | Recommended for other machines |
+| `@shirakawa-kotone/dsh-mcp-fastboot` | MCP connections gate startup; stdio servers pay a protocol probe and npm launch overhead | Host ready in ~1.9 s instead of ~6.0 s\* |
+| `@shirakawa-kotone/dsh-mcp-background` | Lighter alternative: only removes the MCP boot wait | UI opens before MCP finishes |
+| `@shirakawa-kotone/dsh-hot-reload` | DSH's watcher does not watch linked plugins, so edits need a full restart | `reload_dsh` / `/reload` reloads only changed entries in ~100 ms; `/reboot` restarts the whole Host from the GUI |
 
-\* Measured by the author on one machine; details [below](#measurements).
+\* Measured by the author on one machine with four MCP servers; details
+[below](#measurements).
 
-Both bundles are local, `private: true` packages. They are installed into a DSH
-profile with `link:` so the Host loads them from this checkout — nothing here is
-published to npm.
-
-## Requirements
-
-- DSH `0.2.2-rc.1` or a build close to it (the MCP patch reaches into
-  `@modelcontextprotocol/client` internals; see [Caveats](#caveats)).
-- A profile that boots the Web app (or any profile with the `loader`, `tools`
-  and, for hot reload, `hmr` services).
-- For `dsh-mcp-fastboot`: the MCP servers you want to speed up must use the
-  **stdio** transport.
+The npm packages are published on the official registry under
+[`@shirakawa-kotone`](https://www.npmjs.com/org/shirakawa-kotone). The
+`@local/*` packages in this checkout are the development/link-installed
+versions used on this machine; they are not published.
 
 ## Install
 
-Install a bundle as a linked package and register it in the profile's bundle
-list. The `plugin_manager` tool does both in one step:
+Recommended, using an Agent with the `plugin_manager` tool:
 
-```
-plugin_manager → install_bundle  @local/dsh-mcp-fastboot   (spec: link:/abs/path/to/dsh-mcp-fastboot)
-plugin_manager → install_bundle  @local/dsh-hot-reload     (spec: link:/abs/path/to/dsh-hot-reload)
+```text
+plugin_manager install_bundle target: @shirakawa-kotone/dsh-fastboot
 ```
 
-Or do it by hand — add the dependency and the bundle entry to
-`$DSH_HOME/profiles/<profile>/package.json`:
-
-```jsonc
-{
-  "dependencies": {
-    "@local/dsh-mcp-fastboot": "link:/abs/path/to/DSH-fastboot/dsh-mcp-fastboot",
-    "@local/dsh-hot-reload": "link:/abs/path/to/DSH-fastboot/dsh-hot-reload"
-  },
-  "dsh": {
-    "profile": {
-      "bundles": ["@local/dsh-mcp-fastboot", "@local/dsh-hot-reload"]
-    }
-  }
-}
-```
-
-then refresh the profile's packages:
+Or with the CLI, then select the bundle in the profile (Settings → Plugins):
 
 ```sh
-dsh plugin --profile web add link:/abs/path/to/DSH-fastboot/dsh-mcp-fastboot
-dsh plugin --profile web add link:/abs/path/to/DSH-fastboot/dsh-hot-reload
+dsh plugin --profile web add @shirakawa-kotone/dsh-fastboot
 ```
 
-### One extra step for `dsh-mcp-fastboot`
+Restart DSH afterwards. No config is needed.
 
-The MCP patch only works if the plugin imports the **same module instance** the
-Host's `mcp-client` uses. A normal npm dependency would be a separate copy, so
-the bundle expects a symlink into the running DSH installation:
+For an offline / repo-based install of the `@local` bundles:
 
 ```sh
-node /abs/path/to/DSH-fastboot/dsh-mcp-fastboot/scripts/link-sdk.mjs
+cd DSH-fastboot
+./install.sh              # profile "web"
+./install.sh --profile tui
 ```
 
-The script finds the `dsh` binary on `PATH` (override with `DSH_BIN`), locates
-its install's `node_modules`, and links
-`dsh-mcp-fastboot/node_modules/@modelcontextprotocol/client` to it. Re-run it
-after every DSH upgrade. A stale link makes the entry fail to import — DSH logs
-`1 entry did not activate` and MCP falls back to the old, slower path; it does
-not break MCP itself.
+Do **not** select the meta bundle together with an individual bundle, and do not
+install `dsh-mcp-background` alongside `dsh-mcp-fastboot`: the fastboot package
+already includes background start, and the extra wrapper would run twice.
 
-Restart the Host after installing either bundle: the speed-up applies to the
-next boot, not to connections that are already open. `dsh-hot-reload` becomes
-usable as soon as it is loaded.
+## What each part does
 
-## Usage
+### MCP fast boot
 
-### `dsh-mcp-fastboot` — no configuration
+`@deepseek-ai/dsh-mcp-client` connects and performs its first `tools/list`
+inside `apply()`, and Cordis waits for every plugin before the app is ready.
+The fastboot package hooks `Loader.prototype.unwrapExports`, starts that work in
+the background, and patches the shared MCP SDK client before the upstream
+connection begins:
 
-Once loaded, it activates on the next Host start. Two environment switches
-exist if something misbehaves:
+- stdio servers use the legacy handshake, so the SDK does not spawn a
+  short-lived `server/discover` probe process;
+- `npx|npm|pnpm|bunx … mcp-remote <url>` is rewritten to
+  `node ~/.npm/_npx/…/mcp-remote/dist/proxy.js <url>` using the newest cached
+  copy;
+- streamable-HTTP servers keep modern negotiation and only gain background
+  start.
 
-| Variable | Effect |
-|---|---|
-| `DSH_MCP_FASTBOOT_LEGACY=0` | Keep `versionNegotiation: 'auto'` for stdio servers (no probe skip). |
-| `DSH_MCP_FASTBOOT_NPX=0` | Keep the original `npx` command (no cached-proxy rewrite). |
-| `DSH_MCP_REMOTE_PROXY=/path/to/proxy.js` | Use a specific `mcp-remote` entry point instead of the newest npx cache. |
+No static SDK import, no `node_modules` symlink, no install script: the exact
+SDK instance the Host's mcp-client uses is resolved at runtime and patched
+inside the wrapper, which also removes the startup race.
 
-### `dsh-hot-reload` — reload instead of restart
+### Hot reload
 
-As an Agent tool:
+The HMR service already knows how to replace only changed modules, but its
+default watcher does not watch linked workspace packages. The hot-reload bundle
+exposes the HMR service's `reconcileProfile()` as:
 
-| `reload_dsh` action | What it does |
-|---|---|
-| `changed` (default) | Evict modules that changed on disk below the profile and its linked package roots, restart only the entries that run them, report anything that still needs a full restart. |
-| `restart` | Dispose and re-create the entries named in `entries` without reloading code — useful for reconnecting an `include:mcp-*` bridge. |
-| `list` | Show entry ids, modules, states, disabled flags; `query` filters, `limit` caps at 200. |
+- the Agent tool `reload_dsh` (`changed` / `restart` / `list`);
+- the Web UI command `/reload` (no argument = reload changed modules; arguments
+  = restart the named entry ids).
 
-As a command in the Web UI composer:
+### Full restart from the GUI
 
-```
-/reload                  # reload changed modules, restart only their entries
-/reload include:mcp-notion   # restart the named entries
-```
+Some changes cannot be applied in place: a new CLI version, a profile manifest,
+a module in DSH's own host graph. The hot-reload bundle therefore also registers
+`/reboot`, which restarts the whole Host process:
 
-`changed` is a no-op (a few ms) when no watched file changed. It requires the
-`hmr` service; headless profiles still get `list`, and `changed` reports that
-HMR is unavailable. Core entries (`loader`, `hmr`, `tools`, `webserver`,
-`agent-loop`) are refused by `restart` unless `force: true`.
+- it rebuilds the exact `dsh` invocation from the running process (executable,
+  Node flags, entry script, application arguments), always pins the web surface
+  to the port the Host actually bound (an explicit `--port` is rewritten; a
+  config-only port gets one appended), and passes `--no-open` so the new Host
+  does not open a second tab (pass `/reboot --open` to allow that);
+- it spawns a detached helper **before** shutting down, waits for the helper's
+  readiness marker (a helper that cannot start aborts the reboot with the Host
+  still up), answers the command, then SIGTERMs the Host ~700 ms later so
+  `profile-boot`'s bounded disposal flushes sessions and reaps MCP children;
+- the helper waits for the old PID to exit, then launches the same invocation,
+  appending output to `$DSH_HOME/web.log`; it counts the new Host as back only
+  when it accepts a TCP connection on the bound port, and retries if it exits
+  early or never listens;
+- the page reconnects by itself through DSH's persistent signed auth cookie.
+  MCP servers restart with the new Host; with the fastboot bundle their
+  connections run in the background, so the GUI is back before the MCP tools.
 
-## How it works
+`/reboot` is registered only in profiles that mount the web server (a detached
+relaunch of a terminal/ACP Host would be invisible). `/reboot --dry-run` prints
+the relaunch command without doing anything. Do not use `/reboot` when another
+supervisor (systemd, a shell loop) already restarts `dsh`: the two would race
+for the port.
 
-### Skipping the MCP protocol probe
-
-`@deepseek-ai/dsh-mcp-client` creates every MCP `Client` with
-`versionNegotiation: { mode: 'auto' }`. On a **stdio** transport the MCP SDK
-first probes `server/discover` on a short-lived sibling process, then starts the
-real server. For `npx -y mcp-remote …` rows that means npm is launched twice per
-server, and `mcp-remote` (a 2025-era server) never answers the modern probe, so
-the SDK waits out its probe window before falling back to `initialize`.
-
-`dsh-mcp-fastboot` installs a wrapper on `Client.prototype.connect` while its
-module is evaluated — before the MCP entries start — and for stdio transports:
-
-1. pins the client to the legacy handshake (`setVersionNegotiation({ mode:
-   'legacy' })`), so there is no probe and no sibling process;
-2. rewrites `npx|npm|pnpm|bunx … mcp-remote <url>` to
-   `node ~/.npm/_npx/…/mcp-remote/dist/proxy.js <url>`, using the newest cached
-   copy, so npm's wrapper process disappears.
-
-Both rewrites are best-effort and wrapped in `try/catch`: if the SDK internals
-move, the connection still runs exactly as before and the plugin becomes a
-no-op. Streamable-HTTP servers are left untouched and keep modern negotiation.
-
-### Reloading in place
-
-DSH's HMR service already implements the hard part: `reconcileProfile()`
-compares every loaded module below the profile and its linked package roots
-with disk, evicts the changed ones, stops the entries that run them,
-recomposes the profile, and starts those entries again. Its file watcher,
-however, defaults to the profile directory, so a linked plugin under `~/dev/…`
-is outside the watch roots. `dsh-hot-reload` exposes the same reconciliation as
-an Agent tool (`hmr.runExclusive(() => hmr.reconcileProfile())`) and reports
-the entry ids whose fiber identity actually changed.
-
-It does **not** replace a cold process start for Host modules (DSH's own
-graph): those come back in `pending` with `restartRequired` and need a real
-restart. Client-side bundle changes still need the normal browser HMR/refresh
-path.
+**Creation mode can restart too.** Sessions using the `cordis` preset (创造模式)
+also get the Agent tool `reboot_dsh`, so a plugin-development session can apply
+an unavoidable restart itself. It is gated twice: it is invisible in every
+other preset, and it refuses while any *other* live agent — another session or
+a subagent — is still running (idle open sessions do not block); only a
+top-level session may call it. A refusal
+returns the running session ids and reminds the model that the user can still
+run `/reboot` manually. Because the calling turn dies with the process, the
+tool first registers a one-shot Schedule task that delivers a follow-up prompt
+to the same session a few seconds after the new Host is up, so the work
+continues automatically; if the restart cannot start, the follow-up task is
+withdrawn.
 
 ## Measurements
 
-Author's machine, same profile, same temporary `DSH_HOME`, four configured
-servers (Notion + two Cloudflare endpoints over `mcp-remote`, one direct HTTP
-endpoint):
+Staging copy of this profile on DSH 0.2.2-rc.1, four MCP servers (three
+`mcp-remote` stdio servers, one streamable HTTP), from process start to the
+`dsh web: http…` line:
 
-| | Host ready |
-|---|---|
-| before `dsh-mcp-fastboot` | 7.6 s / 10.4 s |
-| after | 5.3 s / 5.4 s / 5.6 s |
-| no MCP entries at all | 1.6 s |
+| | Host ready | MCP tools ready |
+|---|---|---|
+| without acceleration | 5.96 s | 5.25 s (before URL) |
+| with fastboot | **1.89–1.92 s** (three boots) | ~5.5 s (background) |
 
-MCP child processes start at ~1.5 s instead of ~4.7 s, and the log shows
-`initialize` directly instead of a failed `server/discover` probe. The remaining
-~3.5 s is `mcp-remote`'s own OAuth discovery + remote `tools/list`, which runs
-in parallel across servers and is network-bound — not something a local plugin
-can remove.
+The remaining ~1.9 s is the base plugin tree. Further gains would require
+deferring optional UI plugins per profile, which is no longer a generic,
+side-effect-free change.
 
-`dsh-hot-reload` was verified live: editing a linked plugin and calling
-`reload_dsh {"action":"changed"}` restarted exactly `include:mcp-fastboot` in
-~112 ms, with the entry active again afterwards.
+## Adding an MCP server
 
-## Project layout
-
-```
-.
-├── dsh-mcp-fastboot/       # bundle: skip stdio MCP probe + npx overhead
-│   ├── lib/patch.js        #   Client.prototype.connect wrapper
-│   ├── lib/index.js        #   installs the patch at module evaluation
-│   └── scripts/link-sdk.mjs#   relink the MCP SDK after a DSH upgrade
-├── dsh-hot-reload/         # bundle: reload_dsh tool + /reload command
-├── UPDATE-0.2.2.md         # dated notes for the 0.2.1-rc.5 → 0.2.2-rc.1 update
-└── README.md
-```
-
-Each bundle has its own README with the full install and behaviour notes:
-[`dsh-mcp-fastboot/README.md`](dsh-mcp-fastboot/README.md),
-[`dsh-hot-reload/README.md`](dsh-hot-reload/README.md).
+Adding a server stays the normal DSH flow: insert a
+`name: '@deepseek-ai/dsh-mcp-client'` row in the profile's
+`cordis.patch.yml`, then restart (externally, or from the GUI with `/reboot`)
+or `/reload`. Both accelerators pick it up automatically. See [ADD-MCP.md](ADD-MCP.md) for stdio/HTTP examples.
 
 ## Caveats
 
-- **Version-sensitive.** The MCP patch was written against DSH `0.2.2-rc.1` /
-  MCP SDK `2.2.0` and patches `Client.prototype.connect` and
-  `StdioClientTransport._serverParams`. Upstream changes turn it into a no-op
-  rather than a crash, but re-verify the speed-up after a DSH upgrade.
-- **stdio only.** Streamable-HTTP MCP servers are untouched.
-- **Not a package.** Both bundles are `private: true` and installed by `link:`;
-  they are not on npm and are not meant to be installed that way.
-- **Restart to benefit.** MCP connections opened before the plugin loaded keep
-  the old path.
+- **Version-sensitive.** The hooks were written against DSH `0.2.2-rc.1` /
+  MCP SDK `2.2.0` and touch `Loader.prototype.unwrapExports`,
+  `Client.prototype.connect` and `StdioClientTransport._serverParams`. Upstream
+  changes turn them into a no-op rather than a crash, but re-verify after a DSH
+  upgrade.
+- **MCP tools arrive shortly after the UI.** A first request sent before the
+  connection finishes may not see the MCP tools; DSH rebuilds the tool list on
+  later steps, so they appear there.
+- **stdio only for the probe/npx patch.** Streamable-HTTP servers get
+  background start only.
+- **`/reboot` relaunches the same invocation.** It does not upgrade anything by
+  itself: if the CLI on disk moved to another install directory and the running
+  process was started from the old one, the restart uses the old path. Run the
+  new `dsh` once to switch. It also assumes no other process manager owns the
+  Host (otherwise the port races).
+- **A failed initial MCP connection is logged**, not fatal, so
+  `failOnStartupError` no longer aborts boot for the initial attempt.
+
+## Repository layout
+
+```
+dsh-mcp-fastboot/       # local @local bundle (link-installed on this machine)
+dsh-mcp-background/     # local lighter bundle
+dsh-hot-reload/         # local hot-reload bundle
+npm-publish/            # sources for the @shirakawa-kotone npm packages
+ADD-MCP.md              # adding an MCP server
+UPDATE-0.2.2.md         # DSH 0.2.1-rc.5 -> 0.2.2-rc.1 update notes
+install.sh              # offline linked install for the @local bundles
+```
 
 ## License
 
-No license file yet. Treat the code as all rights reserved until one is added.
+MIT

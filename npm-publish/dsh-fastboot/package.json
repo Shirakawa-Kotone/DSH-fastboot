@@ -1,0 +1,38 @@
+{
+  "name": "@shirakawa-kotone/dsh-fastboot",
+  "version": "1.2.0",
+  "description": "One-install DSH fast-boot suite: MCP background start, stdio probe/npx removal, /reload hot reload, /reboot full-Host restart, and the Creation-mode reboot_dsh tool.",
+  "type": "module",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "mcp",
+    "startup",
+    "performance",
+    "hot-reload",
+    "reboot"
+  ],
+  "dependencies": {
+    "@shirakawa-kotone/dsh-hot-reload": "^1.2.0",
+    "@shirakawa-kotone/dsh-mcp-fastboot": "^1.0.0"
+  },
+  "files": [
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "engines": {
+      "dsh": ">=0.2.1-rc.5"
+    }
+  }
+}
