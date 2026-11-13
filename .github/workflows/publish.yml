@@ -41,7 +41,7 @@ jobs:
           for dir in dsh-hot-reload dsh-mcp-fastboot dsh-mcp-background dsh-fastboot; do
             name=$(node -p "require('./npm-publish/${dir}/package.json').name")
             version=$(node -p "require('./npm-publish/${dir}/package.json').version")
-            if npm view "${name}@${version}" version >/dev/null 2>&1; then
+            if npm view "${name}@${version}" version --prefer-online >/dev/null 2>&1; then
               echo "skip ${name}@${version} (already on the registry)"
               continue
             fi
